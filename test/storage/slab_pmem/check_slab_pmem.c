@@ -1340,6 +1340,51 @@ START_TEST(test_metrics_lruq_rebuild)
 }
 END_TEST
 
+START_TEST(test_metrics_refcount)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+    struct slab * s;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    /* reserve & release */
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    s = item_to_slab(it);
+
+    test_reset(0);
+
+    ck_assert_msg(s->refcount == 1, "slab refcount %"PRIu32"; 1 expected", s->refcount);
+    item_release(&it);
+    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
+
+    /* reserve & backfill (& link) */
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    s = item_to_slab(it);
+    ck_assert_msg(s->refcount == 1, "slab refcount %"PRIu32"; 1 expected", s->refcount);
+    val = null_bstring;
+    item_backfill(it, &val);
+    item_insert(it, &key);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
+}
+END_TEST
+
 /*
  * test suite
  */
@@ -1383,6 +1428,8 @@ slab_suite(void)
     tcase_add_test(tc_smetrics, test_metrics_append_basic);
     tcase_add_test(tc_smetrics, test_metrics_update_basic);
     tcase_add_test(tc_smetrics, test_metrics_lruq_rebuild);
+    tcase_add_test(tc_smetrics, test_metrics_refcount);
+
 
     return s;
 }
